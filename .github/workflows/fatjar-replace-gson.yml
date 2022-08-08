@@ -1,0 +1,71 @@
+name: Fatjar-Replace-Gson
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Gson TAG'
+        required: true
+        default: 'gson-parent-2.8.6'
+        
+jobs:
+  fatjar-replace-gson:
+    runs-on: ubuntu-latest
+    
+    env:
+      GSON_REPO: ${{ 'google/gson' }}
+      GSON_BUILD_CONFIG_FROM: ${{ 'gson/src/main/java-templates/com/google/gson/internal/GsonBuildConfig.java' }}
+      GSON_BUILD_CONFIG_TO: ${{ 'gson/src/main/java/com/google/gson/internal/GsonBuildConfig.java' }}
+      GSON_MODULE_INFO: ${{ 'gson/src/main/java/module-info.java' }}
+      BUILD_GRADLE_FROM_REGEX: ${{ 'dependencies {' }}
+      BUILD_GRADLE_TO_REGEX: ${{ 'dependencies {\n\timplementation project(":gson")' }}
+      
+    steps:
+      - name: clone fatjar-replace repo
+        uses: actions/checkout@v3
+        with:
+          path: fatjar-replace-repo
+        
+      - name: clone gson repo
+        uses: actions/checkout@v3
+        with:
+          repository: '${{ env.GSON_REPO }}'
+          ref: "${{ github.event.inputs.tag }}"
+          path: gson-repo
+       
+      - name: setup java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+          cache: 'gradle'
+          
+      - name: change package name
+        run: |
+          chmod +x fatjar-replace-repo/replace/iterate.sh
+          [ -d gson-repo/src/generated/java/com/google/gson ] && mv gson-repo/src/generated/java/com/google/gson/* gson-repo/src/main/java/com/google/gson/
+          [ ! -d gson-repo/gson ] && mkdir gson-repo/gson && mv gson-repo/src gson-repo/gson
+          cd gson-repo/gson
+          [ -f 'Gson 2.1 notes.txt' ] && rm 'Gson 2.1 notes.txt'
+          $GITHUB_WORKSPACE/fatjar-replace-repo/replace/iterate.sh com.google.gson
+        shell: bash
+          
+      - name: gson build preset
+        run: |
+          [ -f gson-repo/"$GSON_BUILD_CONFIG_FROM" ] && mv gson-repo/"$GSON_BUILD_CONFIG_FROM" gson-repo/"$GSON_BUILD_CONFIG_TO"
+          [ -f gson-repo/"$GSON_MODULE_INFO" ] && rm gson-repo/"$GSON_MODULE_INFO"
+          cp -r gson-repo/gson fatjar-replace-repo/sample
+          cp fatjar-replace-repo/replace/gradle/java/build.gradle fatjar-replace-repo/sample/gson
+          echo "include ':gson'" >> fatjar-replace-repo/sample/settings.gradle
+          sed -i "s/$BUILD_GRADLE_FROM_REGEX/$BUILD_GRADLE_TO_REGEX/" fatjar-replace-repo/sample/app/build.gradle
+          
+      - name: build fatjar-replace-repo/sample
+        run: |
+          cd fatjar-replace-repo/sample
+          ./gradlew app:assembleRelease
+        
+      - name: upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Gson JAR
+          path: fatjar-replace-repo/sample/gson/build/libs/*.jar

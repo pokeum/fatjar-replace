@@ -1,0 +1,70 @@
+name: Fatjar-Replace-Koin
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Koin TAG'
+        required: true
+        default: '2.2.2'
+        
+jobs:
+  fatjar-replace-koin:
+    runs-on: ubuntu-latest
+    
+    env:
+      KOIN_REPO: ${{ 'InsertKoinIO/koin' }}
+      IMPORT_MODULE_SHELL: ${{ 'fatjar-replace-repo/replace/import-module/koin.sh' }}
+      ITERATE_SHELL: ${{ 'fatjar-replace-repo/replace/iterate.sh' }}
+      BUILD_GRADLE_FROM_REGEX: ${{ 'dependencies {' }}
+      BUILD_GRADLE_TO_REGEX: ${{ 'dependencies {\n\timplementation project(":koin")' }}
+      
+    steps:
+      - name: clone fatjar-replace repo
+        uses: actions/checkout@v3
+        with:
+          path: fatjar-replace-repo
+        
+      - name: clone koin repo
+        uses: actions/checkout@v3
+        with:
+          repository: '${{ env.KOIN_REPO }}'
+          ref: "${{ github.event.inputs.tag }}"
+          path: koin-repo
+       
+      - name: setup java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+          cache: 'gradle'
+          
+      - name: import koin module
+        run: |
+          chmod +x $IMPORT_MODULE_SHELL
+          $GITHUB_WORKSPACE/$IMPORT_MODULE_SHELL fatjar-replace-repo koin-repo
+        shell: bash
+          
+      - name: change package name
+        run: |
+          chmod +x $ITERATE_SHELL
+          cd fatjar-replace-repo/sample/koin
+          $GITHUB_WORKSPACE/$ITERATE_SHELL org.koin.core
+        shell: bash
+          
+      - name: koin build preset
+        run: |
+          cp fatjar-replace-repo/replace/gradle/kotlin/build.gradle fatjar-replace-repo/sample/koin
+          echo "include ':koin'" >> fatjar-replace-repo/sample/settings.gradle
+          sed -i "s/$BUILD_GRADLE_FROM_REGEX/$BUILD_GRADLE_TO_REGEX/" fatjar-replace-repo/sample/app/build.gradle
+          
+      - name: build fatjar-replace-repo/sample
+        run: |
+          cd fatjar-replace-repo/sample
+          ./gradlew app:assembleRelease
+        
+      - name: upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Koin JAR
+          path: fatjar-replace-repo/sample/koin/build/libs/*.jar
